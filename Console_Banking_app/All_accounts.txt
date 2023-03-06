@@ -1,0 +1,6 @@
+   19064               Bolaji_Emmanuel   Savings      1000      0910
+   34935                Ayodeji_Bolaji   Current     15000      7890
+   74624               Miracle_Ayodeji   Savings     50000      0002
+   13840                Fortune_Bolaji   Savings       100      0897
+   73501                Esther_Olamide   Savings    150000      1997
+   41392                Akeem_Emmanuel   Current     19000      9000
