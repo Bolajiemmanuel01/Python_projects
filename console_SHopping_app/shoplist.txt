@@ -1,0 +1,10 @@
+  101          bread     500  24
+  102             CD     750 462
+  103           Milo    1500 100
+  104           Milk    1000 146
+  105        Sardine     550 485
+  106          Honey    1500  63
+  107           Eggs    2500 180
+  108        Noodles    3700  97
+  109  Panadol_Extra     450  44
+  110         Butter     450  90
