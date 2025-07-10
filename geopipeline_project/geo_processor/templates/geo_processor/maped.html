@@ -1,0 +1,792 @@
+{% extends "geo_processor/base.html" %}
+{% load static %}
+
+{% block title %}AOI Map Interface{% endblock %}
+
+{% block content %}
+<!-- Top Navbar -->
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container-fluid">
+    <a class="navbar-brand" href="/">🌍 Sentinel AOI</a>
+    <div class="d-flex">
+        {% if user.is_authenticated %}
+        <span class="navbar-text text-white me-3">Welcome, {{ user.username }}</span>
+        <a href="{% url 'logout' %}" class="btn btn-outline-light btn-sm">Logout</a>
+        {% else %}
+        <a href="{% url 'login' %}" class="btn btn-outline-light btn-sm me-2">Login</a>
+        <a href="{% url 'register' %}" class="btn btn-outline-light btn-sm">Register</a>
+        {% endif %}
+    </div>
+    </div>
+</nav>
+
+
+<h2 style="text-align:center;">AOIs and Sentinel Imagery Map</h2>
+<!-- For the Select Option at the top-->
+<div style="text-align: center; margin-bottom: 10px;">
+    <label for="aoiSelect"><b>Select AOI:</b></label>
+    <select id="aoiSelect">
+    <option value="">-- All AOIs --</option>
+    </select>
+</div>
+<div class="query-controls"> <!-- Query button-->
+    <button id="querySentinelBtn" class="btn btn-primary">Query Sentinel Imagery</button>
+</div>
+
+<div id="queryResults" class="results-container mt-3">
+    <!-- Sentinel imagery results will appear here -->
+</div>
+
+
+
+{% include "geo_processor/modals/aoi_name_modal.html" %}
+{% include "geo_processor/modals/edit_aoi_modal.html" %}
+{% include "geo_processor/modals/download_modal.html" %}
+
+
+<div id="map"></div>
+
+<div style="position: absolute; top: 100px; right: 10px; z-index: 9999; background: white; padding: 10px; border-radius: 8px;">
+    <label for="opacitySlider">Opacity</label>
+    <input type="range" id="opacitySlider" min="0" max="1" step="0.1" value="1">
+    <button id="removeImageBtn" class="btn btn-danger btn-sm mt-2">Remove Image</button>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    function getCSRFToken() {
+    const name = 'csrftoken';
+    const cookieValue = document.cookie
+        .split('; ')
+        .find(row => row.startsWith(name + '='))
+        ?.split('=')[1];
+    return cookieValue || '';
+    }
+
+    // Ensure that the Save button runs
+    document.getElementById('confirmAoiName').addEventListener('click', submitAOI);
+
+    // Create Map
+    const map = L.map('map').setView([9.0820, 8.6753], 6); // Nigeria center
+
+    // Let's define our Layers
+
+    // Street map - Default Base layer
+    const streetMap = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+    attribution: '© OpenStreetMap'
+    });
+
+    // Satelite map - From ESRI
+    const satelliteMap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 18,
+    attribution: 'Tiles © Esri'
+    });
+
+    // Add default base layer
+    streetMap.addTo(map);
+
+    // Base layers object
+    const baseMaps = {
+    "Street Map": streetMap,
+    "Satellite View": satelliteMap
+    };
+
+    // Define AOI Layer
+    const aoiLayerGroup = L.layerGroup().addTo(map);
+    // Define Imagery Layer
+    const imageryLayerGroup = L.layerGroup().addTo(map);
+    // Raster Layer
+    const sentinelRasterGroup = L.layerGroup().addTo(map);
+
+
+    // Add Map Overlay
+    const overlayMaps = {
+    "AOIs": aoiLayerGroup,
+    "Sentinel Imagery": imageryLayerGroup,
+    "Sentinel Raster Image": sentinelRasterGroup
+    };
+
+    // Add Layer Control
+    L.control.layers(baseMaps, overlayMaps, { collapsed: false }).addTo(map);
+
+    
+    // Add Leaflet draw integrations
+    const drawnItems = new L.FeatureGroup().addTo(map);
+
+    // Add Leaflet drawing control
+    const drawControl = new L.Control.Draw({
+    draw: {
+        polyline: false,
+        marker: false,
+        circle: false,
+        circlemarker: false,
+        rectangle: {
+        shapeOptions: {
+            color: "#28a745",
+            weight: 2,
+            fillOpacity: 0.4
+        }
+        },
+        polygon: {
+        allowIntersection: false,
+        showArea: true,
+        shapeOptions: {
+            color: "#007bff",
+            weight: 2,
+            fillOpacity: 0.4
+        }
+        }
+    },
+    edit: {
+        featureGroup: drawnItems,
+        edit: true,
+        remove: true
+    }
+    });
+
+    // Attach it to the map
+    map.addControl(drawControl);
+
+
+    // Load AOI into dropdown and Map
+    fetch('/api/aois/')
+    .then(res => res.json())
+    // create the select element
+    .then(data => {
+        const select = document.getElementById('aoiSelect');
+
+        // Extract data from th json, the iterate over it. Create the option element and store the properties we need there
+        data.features.forEach(feature => {
+        const option = document.createElement('option');
+        option.value = feature.id;
+        option.textContent = feature.properties.name;
+        select.appendChild(option);
+        });
+
+        // Render the data
+        renderAOIs(data);
+    });
+
+    // load all sentinel imagery by default
+    fetch('/api/sentinel-imagery-geo/')
+    .then(res => res.json())
+    .then(data => renderImagery(data));
+
+    // Make the filter logic effective
+    document.getElementById('aoiSelect').addEventListener('change', (e) => {
+    const selectedId = e.target.value;
+
+    aoiLayerGroup.clearLayers();
+    imageryLayerGroup.clearLayers();
+
+    // If there's no selection
+    if (!selectedId) {
+        // Load all AOI Layer
+        fetch('/api/aois/')
+        .then(res => res.json())
+        .then(data => renderAOIs(data));
+        // Load all Sentinel Imagery
+        fetch('/api/sentinel-imagery-geo/')
+        .then(res => res.json())
+        .then(data => renderImagery(data));
+    } else {
+        // Let's call the AOIs by the selected ID
+        fetch(`/api/aois/${selectedId}/`)
+        .then(res => res.json())
+        .then(feature => {
+            renderAOIs({"type": "FeatureCollection", "features": [feature]}, true);
+        });
+        // Let's call the Sentinel Imagery by the selected ID
+        fetch(`/api/sentinel-imagery-geo/?aoi_id=${selectedId}`)
+        .then(res => res.json())
+        .then(data => renderImagery(data));
+    }
+    })
+    // Create the configuration function
+    function renderAOIs(geojson, zoom = false) {
+    aoiLayerGroup.clearLayers(); // Optional: ensure no duplicates
+    aoiLayer = L.geoJSON(geojson, {
+        style: { color: 'blue', weight: 2 },
+        onEachFeature: (feature, layer) => {
+        const id = feature.id;
+        if (id) {
+            aoiIdToLayerMap[id] = layer;  // ✅ Track each layer by AOI ID
+        }
+        layer.bindPopup(createAoiPopupContent(feature));
+        }
+    });
+    aoiLayerGroup.addLayer(aoiLayer);
+
+
+    // Optional: zoom to AOI if needed
+    if (zoom && geojson.features.length === 1) {
+        map.fitBounds(aoiLayer.getBounds());
+    }
+    }
+
+
+    function renderImagery(geojson) {
+    L.geoJSON(geojson, {
+        style: { color: 'red', weight: 1, dashArray: '4' },
+        onEachFeature: (feature, layer) => {
+        const { timestamp, cloud_coverage } = feature.properties;
+        layer.bindPopup(`<b>AOI:</b> ${feature.properties.name}<br><b>Description:</b> ${feature.properties.description || 'N/A'}`);
+        }
+    }).addTo(imageryLayerGroup); // Add to Layer
+    }
+
+
+    // This Handles AOI creation and workflow
+    let drawnGeometry = null;
+    const aoiIdToLayerMap = {};
+
+
+    // Attaching the drawing on the Map 
+    map.on(L.Draw.Event.CREATED, (e) => {
+    drawnItems.clearLayers(); // clears existing drawing
+    const layer = e.layer;
+    drawnItems.addLayer(layer);
+    drawnGeometry = layer.toGeoJSON().geometry;
+    openModal(); //Open modal for name input
+    });
+
+    // Create function to open modal
+    function openModal() {
+    const modalElement = document.getElementById('aoiNameModal');
+    let modal = bootstrap.Modal.getInstance(modalElement);
+
+    if (!modal) {
+        modal = new bootstrap.Modal(modalElement); // initialize if not already
+    }
+
+    modal.show();
+    }
+
+    // Create function to close modal
+    function closeModal() {
+    // Get the modal element on the page
+    const modalElement = document.getElementById('aoiNameModal');
+    const modal = bootstrap.Modal.getInstance(modalElement);
+    modal.hide();
+    document.getElementById('aoiNameInput').value = '';
+    document.getElementById('aoiDescriptionInput').value = '';
+    }
+
+    // Refresh Function
+    function refreshAOIs() {
+    fetch('/api/aois/')
+    .then(res => res.json())
+    .then(data => {
+        renderAOIs(data); // Existing render function
+        const select = document.getElementById('aoiSelect')
+        select.innerHTML = '<option value="">-- All AOIs --</option>';
+        data.features.forEach(feature => {
+        const option = document.createElement('option');
+        option.value = feature.id;
+        option.textContent = feature.properties.name;
+        select.appendChild(option);
+        });
+    });
+    }
+    
+    // Submit Function for New AOI
+    function submitAOI() {
+    const name = document.getElementById('aoiNameInput').value.trim();
+    const description = document.getElementById('aoiDescriptionInput').value.trim();
+    const properties = { name: name, description: description };
+
+    // Checks and Alerts when the AOI name is't there 
+    if (!name || !drawnGeometry) {
+        alert("AOI name and Geometry are required.");
+        return;
+    }
+
+    // Post the information to the Database
+    fetch('/api/aois/', {
+        method: 'POST',
+        headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCSRFToken()
+        },
+        body: JSON.stringify({geometry: drawnGeometry, properties})
+    })
+    .then(res => {
+        if (!res.ok) throw new Error("Failed to save AOI."); // Check if it saved
+        return res.json();
+    })
+    .then(() => {
+        alert("AOI saved.");
+        closeModal();
+        refreshAOIs(); // reload and render
+    })
+    .catch(err => {
+        console.error(err);
+        alert("Error saving AOI."); // Catch Error
+    });
+    }
+
+    // hold the currently displayed raster
+    let sentinelRasterLayer = null;
+    let sentinelRasterOverlayControlAdded = false;
+
+
+    // Function to display the image on the map
+    function displayImageOnMap(url, aoiId) {
+    const layer = aoiIdToLayerMap[aoiId];
+    if (!layer || !layer.getBounds) {
+        alert("Could not determine bounds for AOI.");
+        return;
+    }
+
+    const aoiBounds = layer.getBounds();
+
+    // Optional: clear old raster layers if you want only one shown at a time
+    sentinelRasterGroup.clearLayers();
+
+    // Create an image overlay and add to group
+    let raster = L.imageOverlay(url, aoiBounds, {
+        opacity: 0.7
+    });
+    document.getElementById('opacitySlider').addEventListener('input', function () {
+        const value = parseFloat(this.value);
+        if (raster) {
+        raster.setOpacity(value);
+        }
+    });
+
+    document.getElementById('removeImageBtn').addEventListener('click', function () {
+        if (raster) {
+        map.removeLayer(raster);
+        raster = null;
+        }
+    });
+
+
+    sentinelRasterGroup.addLayer(raster);
+
+    // Auto-zoom
+    map.fitBounds(aoiBounds);
+    }
+
+
+
+
+    // Download Sentinel Image function
+    function downloadImage(aoiId, startDate, endDate) {
+    fetch(`/api/aois/${aoiId}/download/`, {
+        method: 'POST',
+        headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCSRFToken()
+        },
+        body: JSON.stringify({
+        start_date: startDate,
+        end_date: endDate
+        })
+    })
+    .then(res => {
+        if (!res.ok) {
+        throw new Error('Image download failed');
+        }
+        return res.blob();
+    })
+    .then(blob => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `sentinel_image_aoi_${aoiId}.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+    })
+    .catch(error => alert(error.message));
+    }
+
+    // POPUP Function
+    function createAoiPopupContent(aoi) {
+    return `
+        <div>
+        <strong>${aoi.properties.name}</strong><br/>
+        ${aoi.properties.description || ''}<br/><br/>
+        <button class="btn btn-sm btn-success download-sent-img-btn" data-id="${aoi.id}">Download Sentinel Image</button>
+        <button class="btn btn-sm btn-warning edit-aoi-btn" data-id="${aoi.id}">Edit</button>
+        <button class="btn btn-sm btn-warning edit-geo-aoi-btn" data-id="${aoi.id}">Edit Geometry</button>
+        <button class="btn btn-sm btn-danger delete-aoi-btn" data-id="${aoi.id}">Delete</button>
+
+        <hr>
+        <div><b>Download History:</b></div>
+        <div id="popup-download-list-${aoi.id}"><i>Loading...</i></div>
+        </div>
+    `;
+    }
+
+
+    // Lets define what happnend once the popup is triggered: the edit and delete button
+    // First i'll delegate button events
+    // When the popup is open on the map
+    map.on('popupopen', function(e) {
+
+    // Get all the element on the popup
+    const popupNode = e.popup.getElement();
+
+    // At the end of the popupopen handler
+    const aoiId = e.popup._source.feature.id;
+    const popupDownloadList = document.getElementById(`popup-download-list-${aoiId}`);
+    if (popupDownloadList) {
+        fetch(`/api/downloads/?aoi=${aoiId}`)
+        .then(res => res.json())
+        .then(data => {
+            if (!data.length) {
+            popupDownloadList.innerHTML = "<i>No download history for this AOI.</i>";
+            return;
+            }
+
+            const list = document.createElement("ul");
+            list.style.listStyle = "none";
+            list.style.paddingLeft = "0";
+
+            data.forEach(entry => {
+            const item = document.createElement("li");
+            item.style.borderBottom = "1px solid #ccc";
+            item.style.marginBottom = "10px";
+            item.innerHTML = `
+                <b>Type:</b> ${entry.image_type.toUpperCase()}<br>
+                <b>Dates:</b> ${entry.start_date} → ${entry.end_date}<br>
+                <b>Downloaded:</b> ${new Date(entry.timestamp).toLocaleString()}<br>
+                <button class="btn btn-sm btn-outline-primary re-download-btn"
+                        data-id="${aoiId}"
+                        data-start="${entry.start_date}"
+                        data-end="${entry.end_date}"
+                        data-type="${entry.image_type}">
+                Re-download
+                </button>
+            `;
+            list.appendChild(item);
+            });
+
+            popupDownloadList.innerHTML = "";
+            popupDownloadList.appendChild(list);
+
+            // Handle Re-download Buttons
+            const popupNode = e.popup.getElement();
+            popupNode.querySelectorAll('.re-download-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const aoiId = btn.dataset.id;
+                const start = btn.dataset.start;
+                const end = btn.dataset.end;
+                const type = btn.dataset.type;
+
+                const spinner = L.DomUtil.create('div', 'spinner-border text-primary');
+                spinner.setAttribute('role', 'status');
+                document.body.appendChild(spinner);
+
+                fetch(`/api/aois/${aoiId}/download/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCSRFToken()
+                },
+                body: JSON.stringify({
+                    start_date: start,
+                    end_date: end,
+                    image_type: type
+                })
+                })
+                .then(res => res.ok ? res.blob() : res.json().then(err => Promise.reject(err)))
+                .then(blob => {
+                const url = URL.createObjectURL(blob);
+                displayImageOnMap(url, aoiId);
+                })
+                .catch(err => {
+                console.error("Re-download failed:", err);
+                alert("Error: " + (err?.error || "Re-download failed"));
+                })
+                .finally(() => spinner.remove());
+            });
+            });
+
+        })
+        .catch(err => {
+            popupDownloadList.innerHTML = "<span style='color:red;'>Error loading download history.</span>";
+            console.error(err);
+        });
+    }
+
+
+    // Let's treat the edit AOI handler
+    const editBtn = popupNode.querySelector('.edit-aoi-btn'); //This takes care of the edit button when queried
+    // Check if the edit button isn't empty
+    if (editBtn) {
+        // Listens for when the edit button is clicked and tells it what to do
+        editBtn.addEventListener('click', () => {
+        // First get the ID that was passed from the selection of the AOI
+        const aoiId = editBtn.dataset.id;
+        // Fetch the Data to populate the edit popup
+        fetch(`/api/aois/${aoiId}/`)
+            // Then load the data
+            .then(res => res.json())
+            // now get the data that i need from the json feedback
+            .then(data => {
+            // get the aoiID, name and description to prefill the edit form
+            document.getElementById('editAoiId').value = data.id;
+            document.getElementById('editAoiName').value = data.properties.name;
+            document.getElementById('editAoiDescription').value = data.properties.description || '';
+            // Now dsplay the modal with the prefille values gotten 
+            const modal = new bootstrap.Modal(document.getElementById('editAoiModal'));
+            modal.show();
+            });
+        });
+    }
+
+    // EDIT GEOMETRY
+    const editGeoBtn = popupNode.querySelector('.edit-geo-aoi-btn');
+    if (editGeoBtn) {
+        editGeoBtn.addEventListener('click', () => {
+        const aoiId = editGeoBtn.dataset.id;
+
+        // Get geometry from API
+        fetch(`/api/aois/${aoiId}/`)
+            .then(res => res.json())
+            .then(data => {
+            drawnItems.clearLayers();
+            const geometry = L.geoJSON(data).getLayers()[0];
+
+            drawnItems.addLayer(geometry);
+            map.fitBounds(geometry.getBounds());
+
+            // Now listen for edits and save when complete
+            map.once('draw:edited', function(e) {
+                const editedLayer = e.layers.getLayers()[0];
+                const newGeometry = editedLayer.toGeoJSON().geometry;
+
+                fetch(`/api/aois/${aoiId}/updategeo/`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCSRFToken()
+                },
+                body: JSON.stringify({ geometry: newGeometry })
+                })
+                .then(res => {
+                if (!res.ok) throw new Error("Failed to update geometry.");
+                alert("Geometry updated.");
+                refreshAOIs();
+                })
+                .catch(err => {
+                console.error(err);
+                alert("Error updating geometry.");
+                });
+            });
+
+            alert("Now edit the geometry on the map and click save.");
+            });
+        });
+    }
+
+    // Download button
+    const downSentBtn = popupNode.querySelector('.download-sent-img-btn'); //This takes care of the download button when queried
+    // Check if the download button isn't empty
+    if (downSentBtn) {
+        // Listens for when the download button is clicked and tells it what to do
+        downSentBtn.addEventListener('click', () => {
+        // First get the ID that was passed from the selection of the AOI
+        const aoiId = downSentBtn.dataset.id;
+
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('SentinelAoiId').value = aoiId;
+        document.getElementById('endDate').value = today;
+        document.getElementById('startDate').value = today;
+        const modal = new bootstrap.Modal(document.getElementById('downloadModal'));
+        modal.show();
+
+        // downloadImage(aoiId, "2024-01-01", "2024-01-10")
+        })
+    }
+    // Now let's handle the delete AOI handler
+    const deleteBtn = popupNode.querySelector('.delete-aoi-btn'); // This takes care o the delete button when queried
+    // check if the delete button isn't empty
+    if (deleteBtn) {
+        // Listen for when the delete button is clicked and tell it what to do
+        deleteBtn.addEventListener('click', () => {
+        // get the id so we can query the right AOI
+        const aoiId = deleteBtn.dataset.id;
+        // Reconfirm the delete action
+        if (confirm('Are you sure you want to delete this AOI?')) {
+            // Now fetch the delete query
+            fetch(`/api/aois/${aoiId}/delete/`, {
+            method: "DELETE",
+            headers: {
+                'X-CSRFToken': getCSRFToken()
+            }
+            })
+            .then(res => {
+            if (!res.ok) throw new Error('Failed to delete AOI.'); // If the request isn't ok
+            alert('AOI deleted.');
+            refreshAOIs();
+            })
+            .catch(err => {
+            console.error(err);
+            alert('Error deleting AOI.');
+            });
+        }
+        });
+    }
+    });
+
+    // Listen for the submit button
+    document.getElementById('editAoiForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    // Get all the variables from the for and trim to remove exccess spaces 
+    const aoiId = document.getElementById('editAoiId').value;
+    const updatedName = document.getElementById('editAoiName').value.trim();
+    const updatedDescription = document.getElementById('editAoiDescription').value.trim();
+
+    if (!name) {
+        alert("AOI name is required!");
+        return;
+    }
+
+    // Fetch the update function
+    fetch(`/api/aois/${aoiId}/update/`, {
+        method: 'PATCH',
+        headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCSRFToken()
+        },
+        body: JSON.stringify({
+        properties: {
+            name: updatedName,
+            description: updatedDescription
+        }
+        })
+    })
+    .then(res => {
+        if (!res.ok) throw new Error('Failed to update AOI.'); // Check if the request was ok
+        return res.json();
+    })
+    .then(() => {
+        alert('AOI updated.');
+        bootstrap.Modal.getInstance(document.getElementById('editAoiModal')).hide(); // Hide the for modal
+        aoiLayerGroup.clearLayers();
+        refreshAOIs(); //refresh the AOI 
+    })
+    .catch(err => {
+        console.error(err);
+        alert('Error updating AOI.');
+    });
+    });
+
+    document.getElementById('downloadForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+
+    const aoiId = document.getElementById('SentinelAoiId').value;
+    const startDate = document.getElementById('startDate').value;
+    const endDate = document.getElementById('endDate').value;
+    const imageType = document.getElementById('imageType').value;
+
+    if (!aoiId) {
+        alert("No AOI selected.");
+        return;
+    }
+
+    const spinner = L.DomUtil.create('div', 'spinner-border text-primary');
+    spinner.setAttribute('role', 'status');
+    document.body.appendChild(spinner);
+
+    fetch(`/api/aois/${aoiId}/download/`, {
+        method: 'POST',
+        headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCSRFToken()
+        },
+        body: JSON.stringify({
+        start_date: startDate,
+        end_date: endDate,
+        image_type: imageType
+        })
+    })
+    .then(res => res.ok ? res.blob() : res.json().then(err => Promise.reject(err)))
+    .then(blob => {
+        const url = URL.createObjectURL(blob);
+        displayImageOnMap(url, aoiId);  // ✅ this is the correct next step
+    })
+    .catch(err => {
+        console.error("Download failed:", err);  // ✅ just log the actual error, not aoiId
+        alert("Error: " + (err?.error || "Image download failed"));
+    })
+    .finally(() => spinner.remove());
+    });
+
+
+
+    // Let's make the query sentinel imagery button work
+    // This adds an event listener to the button, listening fr click of the button
+    document.getElementById('querySentinelBtn').addEventListener('click', () => {
+    const selectedId = document.getElementById('aoiSelect').value;
+
+    // Get the result container and clear it
+    const resultsContainer = document.getElementById('queryResults');
+    //Clear it
+    resultsContainer.innerHTML = '';
+
+    // Check if the aoi was selected, then prompt the user to select n aoi
+    if (!selectedId) {
+        resultsContainer.innerHTML = '<p style="text-align:center; color:red;"><b>Please select an AOI to query imagery.</b></p>';
+        return;
+    }
+
+    // Let's call the api to fetch imagery linked to the AOI
+    fetch(`/api/query-sentinel/${selectedId}/`)
+        .then(res => {
+        if (!res.ok) {
+            throw new Error('Error Fetching Imagery data');
+        }
+        return res.json();
+        })
+        .then(data => {
+        if (data.length === 0) {
+            resultsContainer.innerHTML = '<p style="text-align:center;"><i>No imagery found for this AOI.</i></p>';
+            return;
+        }
+
+        // Build and Display result
+        // Design the list container
+        const list = document.createElement('ul');
+        list.style.listStyle = 'none';
+        list.style.padding = '0'
+
+        // populate the list container element
+        data.features.forEach(item => {
+            // Get the properties for each data
+            const props = item.properties
+
+            // Check if props isn't empty
+            if (!props) return;
+
+
+            // Create the list Item
+            const listItem = document.createElement('li');
+            listItem.style.marginBottom = '10px';
+            listItem.style.borderBottom = '1px solid #ccc';
+            // Populate it
+            listItem.innerHTML = `
+            <b>Tile ID:</b> ${item.id}<br>
+            <b>Date:</b> ${props.timestamp}<br>
+            <b>Cloud Coverage:</b> ${props.cloud_coverage}%<br>
+            `;
+
+            // Append to the list container
+            list.appendChild(listItem);
+        });
+
+        resultsContainer.appendChild(list);
+        })
+        .catch(err => {
+        console.error(err);
+        resultsContainer.innerHTML = '<p style="text-align:center; color:red;">Failed to load imagery data.</p>';
+        });
+    });
+</script>
+{% endblock %}

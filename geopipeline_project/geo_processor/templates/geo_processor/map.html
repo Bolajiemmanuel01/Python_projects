@@ -1,0 +1,64 @@
+{% extends "geo_processor/base.html" %}
+{% load static %}
+
+{% block title %}AOI Map Interface{% endblock %}
+
+{% block content %}
+<!-- Top Navbar -->
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container-fluid">
+    <a class="navbar-brand" href="/">🌍 Sentinel AOI</a>
+    <div class="d-flex">
+        {% if user.is_authenticated %}
+        <span class="navbar-text text-white me-3">Welcome, {{ user.username }}</span>
+        <a href="{% url 'logout' %}" class="btn btn-outline-light btn-sm">Logout</a>
+        {% else %}
+        <a href="{% url 'login' %}" class="btn btn-outline-light btn-sm me-2">Login</a>
+        <a href="{% url 'register' %}" class="btn btn-outline-light btn-sm">Register</a>
+        {% endif %}
+    </div>
+    </div>
+</nav>
+
+
+<h2 style="text-align:center;">AOIs and Sentinel Imagery Map</h2>
+<!-- For the Select Option at the top-->
+<div style="text-align: center; margin-bottom: 10px;">
+    <label for="aoiSelect"><b>Select AOI:</b></label>
+    <select id="aoiSelect">
+    <option value="">-- All AOIs --</option>
+    </select>
+</div>
+<div class="query-controls"> <!-- Query button-->
+    <button id="querySentinelBtn" class="btn btn-primary">Query Sentinel Imagery</button>
+</div>
+
+<div id="queryResults" class="results-container mt-3">
+    <!-- Sentinel imagery results will appear here -->
+</div>
+
+
+
+{% include "geo_processor/modals/aoi_name_modal.html" %}
+{% include "geo_processor/modals/edit_aoi_modal.html" %}
+{% include "geo_processor/modals/download_modal.html" %}
+
+
+<div id="map"></div>
+
+<div id="ndviLegend" style="position: absolute; bottom: 20px; right: 10px; z-index: 9999; background: white; padding: 10px; border-radius: 8px; display: none;">
+  <strong>NDVI Legend</strong>
+  <img src="{% static 'images/ndvi_legend.png' %}" alt="NDVI Legend" style="max-width: 200px;">
+</div>
+
+
+<div style="position: absolute; top: 100px; right: 10px; z-index: 9999; background: white; padding: 10px; border-radius: 8px;">
+    <label for="opacitySlider">Opacity</label>
+    <input type="range" id="opacitySlider" min="0" max="1" step="0.1" value="1">
+    <button id="removeImageBtn" class="btn btn-danger btn-sm mt-2">Remove Image</button>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script type="module" src="{% static 'js/map.js' %}"></script>
+{% endblock %}
