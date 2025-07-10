@@ -1,0 +1,38 @@
+<!-- Sentinel Image Download Modal -->
+<div class="modal fade" id="downloadModal" tabindex="-1" aria-labelledby="downloadModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+    <div class="modal-content">
+        <form id="downloadForm">
+        <div class="modal-header">
+            <h5 class="modal-title" id="downloadModalLabel">Download Sentinel Image</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        
+        <div class="modal-body">
+            <input type="hidden" id="SentinelAoiId">
+            <div class="mb-3">
+            <label for="startDate" class="form-label">Start Date</label>
+            <input type="date" class="form-control" id="startDate" required>
+            </div>
+            <div class="mb-3">
+            <label for="endDate" class="form-label">End Date</label>
+            <input type="date" class="form-control" id="endDate" required>
+            </div>
+            <div class="mb-3">
+            <label for="imageType" class="form-label">Image Type</label>
+            <select class="form-select" id="imageType">
+                <option value="true_color">True Color</option>
+                <option value="false_color">False Color</option>
+                <option value="ndvi">NDVI</option>
+            </select>
+            </div>
+        </div>
+
+        <div class="modal-footer">
+            <button type="submit" class="btn btn-primary">Download</button>
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        </div>
+        </form>
+    </div>
+    </div>
+</div>

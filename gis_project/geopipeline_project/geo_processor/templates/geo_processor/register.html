@@ -1,0 +1,19 @@
+{% extends "geo_processor/base.html" %}
+{% load static %}
+
+{% block title %}Register{% endblock %}
+
+{% block content %}
+<div class="container mt-5" style="max-width: 400px;">
+  <h3 class="mb-4">Register</h3>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit" class="btn btn-primary w-100">Register</button>
+  </form>
+  <hr>
+  <p class="mt-2 text-center">
+    Already have an account? <a href="{% url 'login' %}">Login here</a>
+  </p>
+</div>
+{% endblock %}
